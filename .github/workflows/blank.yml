@@ -1,0 +1,274 @@
+########MULTIVARIADAS
+setwd("C:/Users/aapad/OneDrive - ufpr.br/Pós-graduação/Multivariada")
+
+#pacotes a serem instalados, apenas uma vez!
+install.packages("vegan")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("tidyverse")
+install.packages("ggdendro")
+install.packages("labdsv")
+install.packages("ggrepel")
+install.packages("plotly")
+install.packages("ape")
+
+#carregando todos os pacotes para funcionar o script
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(ggdendro)
+library(labdsv)
+library(ggrepel)
+library(plotly)
+library(ape)
+
+#dados exemplo: ambientais do rio Guaraguaçu
+read.csv("Guaragua.csv", header=T, dec = ",", fileEncoding = "latin1", row.names = 1)->Guaragua
+View(Guaragua)
+
+#transformação e padronização: vamos perguntar para o chat!
+#porcentagens: arcoseno da raiz quadrada
+#contínuas: log ou log(x+1) quando tem valores zero
+#pH já é em escala log!
+
+
+amb<-cbind(Guaragua$pH, log(cbind(Guaragua$River_Width, Guaragua$Conductivity..S.cm2., Guaragua$Secchi.cm., Guaragua$Temp..C., Guaragua$Salinity.ppm., Guaragua$Total_dissolved_solids.g.L., Guaragua$Redox)), asin(sqrt(Guaragua$Human_Structures_...)), asin(sqrt(Guaragua$Oxygen.../100)))
+
+colnames(amb) <-c("pH", "Larg", "Cond", "Secc", "Temp", "Sal", "Sol", "Red", "Hum", "Oxy")
+data.frame(amb)->amb
+
+amb
+
+make_unique <- function(names) {
+  make.unique(names, sep = "_")
+}
+
+rownames(amb)<-make_unique(Guaragua$Regiões)
+
+# Primeiro, crie uma versão única dos nomes, adicionando um sufixo quando houver duplicatas
+nomes_unicos <- make.unique(as.character(Guaragua$Regiões))
+
+# Atribua esses nomes únicos às linhas do novo objeto
+rownames(amb) <- nomes_unicos
+amb
+
+#padronização para variáveis com diferentes variações
+decostand(amb, "stand")->amb.std
+amb.std
+mean(amb.std$pH)
+sd(amb.std$pH)
+mean(amb$pH)
+sd(amb$pH)
+mean(amb.std$Larg)
+sd(amb.std$Larg)
+mean(amb$Larg)
+sd(amb$Larg)
+
+#fazendo uma matriz de distância
+vegdist(amb.std, "euclid")->amb.dist
+amb.dist
+
+#fazendo o dendrograma com UPGMA
+?hclust
+hclust(amb.dist, "average")->res.clust
+plot(res.clust)
+
+cophenetic(res.clust)
+
+cor(cophenetic(res.clust), amb.dist)
+
+#fazendo um gráfico estilizado
+
+ggdendrogram(res.clust, rotate=T)
+
+##fazer com os dados 'AmbientaisAraguaia'
+
+
+######################################################
+#######Classificação não hierárquica - kmeans
+read.csv("Guaragua1.csv", row.names = 1)->Guaragua1
+
+#para ficar todos iguais (nem sempre isso funciona)
+set.seed(123)
+
+kmeans(Guaragua1, 2, nstart=25)->a
+kmeans(Guaragua1, 2, nstart=25)$tot.withinss
+
+plot(Guaragua1$Comp.1, Guaragua1$Comp.2, col=a$cluster)
+
+kmeans(Guaragua1, 3, nstart=25)
+kmeans(Guaragua1, 3, nstart=25)$tot.withinss
+
+kmeans(Guaragua1, 4, nstart=25)
+kmeans(Guaragua1, 4, nstart=25)$tot.withinss
+
+kmeans(Guaragua1, 5, nstart=25)
+kmeans(Guaragua1, 5, nstart=25)$tot.withinss
+
+#vale a pena passar de dois para três
+((kmeans(Guaragua1, 2, nstart=25)$tot.withinss/kmeans(Guaragua1, 3, nstart=25)$tot.withinss) - 1)*(16-2-1)
+
+((kmeans(Guaragua1, 3, nstart=25)$tot.withinss/kmeans(Guaragua1, 4, nstart=25)$tot.withinss) - 1)*(16-3-1)
+
+((kmeans(Guaragua1, 4, nstart=25)$tot.withinss/kmeans(Guaragua1, 5, nstart=25)$tot.withinss) - 1)*(16-4-1)
+
+((kmeans(Guaragua1, 5, nstart=25)$tot.withinss/kmeans(Guaragua1, 6, nstart=25)$tot.withinss) - 1)*(16-5-1)
+
+#nesse critério, caiu muito quando mudamos de 4 para 5, depois subiu de 5 para 6, portanto, mantemos em 4
+
+# Função para calcular direto o WSS
+calculate_wcss <- function(data, k) {
+  kmeans_result <- kmeans(data, centers = k, nstart = 25)
+  return(kmeans_result$tot.withinss)
+}
+
+# vamos ver se funciona
+calculate_wcss(Guaragua1,2)
+kmeans(Guaragua1, 2, nstart=25)$tot.withinss
+
+# Função para calcular a estatística R
+calculate_R <- function(data, k) {
+  wcss_k <- calculate_wcss(data, k)
+  wcss_k_plus_1 <- calculate_wcss(data, k + 1)
+  if (wcss_k_plus_1 == 0) {
+    return(Inf)  # or handle the division by zero case appropriately
+  }
+  return(((wcss_k / wcss_k_plus_1) - 1) * (nrow(data) - k - 1))
+}
+
+
+# Gerar uma distribuição nula
+num_permutations <- 1000
+null_distribution <- numeric(num_permutations)
+
+#teste de 2 para 3
+# Calcular a estatística R
+calculate_R(Guaragua1, 2)
+
+#executar o modelo nulo de 2 para 3
+for (i in 1:num_permutations) {
+  shuffled_data <- Guaragua1
+  shuffled_data[, 1] <- sample(Guaragua1[, 1])  # Embaralha apenas a primeira coluna
+  null_distribution[i] <- calculate_R(shuffled_data, 2)
+}
+
+# Valor de P
+mean(null_distribution >= calculate_R(Guaragua1, 2))
+
+#teste de 3 para 4
+# Calcular a estatística R
+calculate_R(Guaragua1, 3)
+
+#executar o modelo nulo de 2 para 3
+for (i in 1:num_permutations) {
+  shuffled_data <- Guaragua1
+  shuffled_data[, 1] <- sample(Guaragua1[, 1])
+  null_distribution[i] <- calculate_R(shuffled_data, 3)
+}
+
+# Valor de P
+mean(null_distribution >= calculate_R(Guaragua1, 3))
+
+#teste de 4 para 5
+# Calcular a estatística R
+calculate_R(Guaragua1, 4)
+
+#executar o modelo nulo de 2 para 3
+for (i in 1:num_permutations) {
+  shuffled_data <- Guaragua1
+  shuffled_data[, 1] <- sample(Guaragua1[, 1])
+  null_distribution[i] <- calculate_R(shuffled_data, 4)
+}
+
+# Valor de P
+mean(null_distribution >= calculate_R(Guaragua1, 4))
+
+#outro critério
+wssplot <- function(data, nc=15, seed=123){
+  wss <- (nrow(data)-1)*sum(apply(data,2,var))
+  for (i in 2:nc){
+    set.seed(seed)
+    wss[i] <- sum(kmeans(data, centers=i)$withinss)}
+  plot(1:nc, wss, type="b", xlab="Number of Clusters",
+       ylab="Within groups sum of squares")}
+
+wssplot(Guaragua1)
+#visualmente também paramos com 4 clusters
+
+
+#fazendo gráficos estilizados
+kmeans(Guaragua1, 4, nstart=25)->resultado
+resultado
+
+Guaragua1.kmeans<-Guaragua1
+colnames(Guaragua1.kmeans)<-c("Comp1", "Comp2")
+Guaragua1.kmeans$Clusters<-resultado$cluster
+
+ggplot(data=Guaragua1.kmeans) +
+  geom_point(size = 4, mapping = aes(x = Comp1, 
+                           y = Comp2, 
+                           color = as.factor(Clusters))) +
+  theme_classic(base_size = 18) +
+  theme(legend.position = "none")
+
+library(ggplot2)
+ggplot() +
+  geom_point(size = 4, mapping = aes(x = Guaragua1$Comp.1, 
+                           y = Guaragua1$Comp.2, 
+                           color = as.factor(resultado$cluster))) +
+  geom_point(mapping = aes(x = resultado$centers[,1], 
+                           y = resultado$centers[,2]),
+             color = "red", size = 5) +
+  theme_classic(base_size = 18) +
+  theme(legend.position = "none")+
+  labs(x = "Comp1", y = "Comp2")
+
+
+#colocando polígonos
+
+Guaragua1.kmeans$Clusters <- as.factor(Guaragua1.kmeans$Clusters)
+
+calculate_hull <- function(Guaragua1.kmeans) {
+  Guaragua1.kmeans[chull(Guaragua1.kmeans$Comp1, Guaragua1.kmeans$Comp2), ]
+}
+
+hulls <- Guaragua1.kmeans %>%
+  group_by(Clusters) %>%
+  do(calculate_hull(.))
+
+ggplot() +
+  geom_polygon(data = hulls, 
+               aes(x = Comp1, y = Comp2, fill = Clusters, group = Clusters),
+               alpha = 0.4, color = NA) +
+  geom_point(size = 4, data = Guaragua1.kmeans, 
+             aes(x = Comp1, y = Comp2, color = Clusters)) +
+  geom_point(data = as.data.frame(resultado$centers), 
+             aes(x = Comp.1, y = Comp.2),
+             color = "red", size = 5) +
+  theme_classic(base_size = 18) +
+  theme(legend.position = "none")
+
+#com elipses, mas não calcula para os grupos com 3 pontos ou menos
+ggplot(Guaragua1.kmeans, aes(x = Comp1, y = Comp2, color = Clusters)) +
+  geom_point(size = 4) +  # Pontos dos dados
+  stat_ellipse(aes(fill = Clusters), geom = "polygon", alpha = 0.3, color = "black", level = 0.88) +  # Elipses
+  geom_point(data = as.data.frame(resultado$centers), 
+             aes(x = Comp.1, y = Comp.2),
+             color = "red", size = 5) +  # Centros dos clusters
+  theme_classic(base_size = 18) +
+  theme(legend.position = "none")
+
+#Fazer com os dados 'Agrupar'
+
+#####IndVal
+read.csv("Guaraguafito.csv", row.names=1, dec=",", fileEncoding = "latin1")->fito
+View(fito)
+
+indval(fito[,-c(1:4)], fito$Regiões)->res.indval
+res.indval
+summary(res.indval)
+
+#Fazer com os dados 'Artropode'
+
+
